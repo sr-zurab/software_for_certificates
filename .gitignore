@@ -1,0 +1,6 @@
+venv/
+.env
+юл/
+фл/
+hide_sertificate.desktop
+run.sh
