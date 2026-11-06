@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cert Filter</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <img class="logo" src="icons/icon32.png" alt="" />
+      <div class="titles">
+        <div class="title">Cert Filter</div>
+        <div class="subtitle">Ultra PRO</div>
+      </div>
+      <span id="hostDot" class="dot" title="Состояние native host"></span>
+      <button id="refreshBtn" class="icon-btn" title="Обновить всё">⟳</button>
+    </header>
+
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="block">
+      <div class="block-head">
+        <label for="configSelect">КОНФИГУРАЦИЯ (JSON)</label>
+        <label class="mini-file" title="Загрузить свой JSON">
+          загрузить
+          <input id="fileInput" type="file" accept=".json,application/json" />
+        </label>
+      </div>
+      <select id="configSelect"></select>
+      <div id="configInfo" class="hint"></div>
+    </section>
+
+    <section class="block">
+      <label for="keyInput">КЛЮЧ</label>
+      <div class="row">
+        <input
+          id="keyInput"
+          type="text"
+          placeholder="Введите номер ключа..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="applyBtn" class="primary">OK</button>
+      </div>
+      <div id="resolved" class="hint"></div>
+    </section>
+
+    <section class="block">
+      <div class="actions">
+        <button id="showAllBtn" class="ghost-green">Показать все</button>
+        <button id="hideAllBtn" class="ghost-red">Скрыть все</button>
+        <button id="reloadCertsBtn" class="ghost">Обновить</button>
+      </div>
+    </section>
+
+    <section class="block grow">
+      <div class="block-head">
+        <label for="certSearch">СЕРТИФИКАТЫ</label>
+        <span id="certCount" class="counter">0</span>
+      </div>
+      <input
+        id="certSearch"
+        type="text"
+        placeholder="Поиск сертификата по CN..."
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <div id="certList" class="cert-list"></div>
+    </section>
+
+    <footer id="log" class="log">Готов</footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

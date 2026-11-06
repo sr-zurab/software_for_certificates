@@ -4,3 +4,6 @@ venv/
 фл/
 hide_sertificate.desktop
 run.sh
+__pycache__/
+*.pyc
+browser_extension/native/configs/
