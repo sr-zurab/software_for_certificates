@@ -259,21 +259,22 @@ def get_cert_details(name: str):
                 crypt32.CertCloseStore(store, 0)
     return None
 
-def delete_cert_and_key(store_name: str, serial: str):
-    store = None
-    try:
-        flags = (CERT_SYSTEM_STORE_CURRENT_USER | CERT_STORE_OPEN_EXISTING_FLAG | 
-                 CERT_STORE_MAXIMUM_ALLOWED_FLAG | CERT_STORE_ENUM_ARCHIVED_FLAG)
-        store = crypt32.CertOpenStore(ctypes.c_void_p(CERT_STORE_PROV_SYSTEM), 0, None, flags, ctypes.c_wchar_p(store_name))
-        if not store:
-            return False
-        for cert in iter_certs(store):
-            ctx = CERT_CONTEXT.from_address(cert)
-            if ctx.pCertInfo:
-                s_blob = ctx.pCertInfo.contents.SerialNumber
-                p_data = ctypes.cast(s_blob.pbData, ctypes.POINTER(ctypes.c_ubyte))
-                cert_serial = "".join(f"{p_data[i]:02X}" for i in range(s_blob.cbData - 1, -1, -1))
-                if cert_serial == serial:
+def delete_cert_and_key(name: str, serial: str = ""):
+    stores = ["MY", "AddressBook"]
+    for s_name in stores:
+        store = None
+        try:
+            flags = (CERT_SYSTEM_STORE_CURRENT_USER | CERT_STORE_OPEN_EXISTING_FLAG | 
+                     CERT_STORE_MAXIMUM_ALLOWED_FLAG | CERT_STORE_ENUM_ARCHIVED_FLAG)
+            store = crypt32.CertOpenStore(ctypes.c_void_p(CERT_STORE_PROV_SYSTEM), 0, None, flags, ctypes.c_wchar_p(s_name))
+            if not store:
+                continue
+            for cert in iter_certs(store):
+                if get_name(cert) == name:
+                    if serial:
+                        cert_serial = get_cert_serial(cert)
+                        if cert_serial != serial:
+                            continue
                     sz = ctypes.c_uint32(0)
                     if crypt32.CertGetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, None, ctypes.byref(sz)):
                         buf = ctypes.create_string_buffer(sz.value)
@@ -284,9 +285,31 @@ def delete_cert_and_key(store_name: str, serial: str):
                                                          info.dwProvType, CRYPT_DELETEKEYSET)
                     dup = crypt32.CertDuplicateCertificateContext(cert)
                     return crypt32.CertDeleteCertificateFromStore(dup)
-    finally:
-        if store:
-            crypt32.CertCloseStore(store, 0)
+        finally:
+            if store:
+                crypt32.CertCloseStore(store, 0)
+    return False
+
+def delete_cert_only(name: str, serial: str = ""):
+    stores = ["MY", "AddressBook"]
+    for s_name in stores:
+        store = None
+        try:
+            flags = (CERT_SYSTEM_STORE_CURRENT_USER | CERT_STORE_OPEN_EXISTING_FLAG | 
+                     CERT_STORE_MAXIMUM_ALLOWED_FLAG | CERT_STORE_ENUM_ARCHIVED_FLAG)
+            store = crypt32.CertOpenStore(ctypes.c_void_p(CERT_STORE_PROV_SYSTEM), 0, None, flags, ctypes.c_wchar_p(s_name))
+            if not store:
+                continue
+            for cert in iter_certs(store):
+                if get_name(cert) != name:
+                    continue
+                if serial and get_cert_serial(cert) != serial:
+                    continue
+                dup = crypt32.CertDuplicateCertificateContext(cert)
+                return crypt32.CertDeleteCertificateFromStore(dup)
+        finally:
+            if store:
+                crypt32.CertCloseStore(store, 0)
     return False
 
 def export_pfx(name: str, path: str, password: str):
@@ -493,6 +516,14 @@ def hide_all():
             if store:
                 crypt32.CertCloseStore(store, 0)
 
+def get_cert_serial(cert) -> str:
+    ctx = CERT_CONTEXT.from_address(cert)
+    if not ctx.pCertInfo:
+        return ""
+    s_blob = ctx.pCertInfo.contents.SerialNumber
+    p_data = ctypes.cast(s_blob.pbData, ctypes.POINTER(ctypes.c_ubyte))
+    return "".join(f"{p_data[i]:02X}" for i in range(s_blob.cbData - 1, -1, -1))
+
 def get_all_certs():
     stores = ["MY", "AddressBook"]
     result = []
@@ -507,20 +538,21 @@ def get_all_certs():
             while curr:
                 try:
                     name = get_name(curr)
+                    serial = get_cert_serial(curr)
                     archived = is_archived(curr)
                     not_before = datetime(1970, 1, 1)
                     not_after = datetime(1970, 1, 1)
-                    serial = ""
                     ctx = CERT_CONTEXT.from_address(curr)
                     if ctx.pCertInfo:
                         not_before = filetime_to_datetime(ctx.pCertInfo.contents.NotBefore)
                         not_after = filetime_to_datetime(ctx.pCertInfo.contents.NotAfter)
-                        s_blob = ctx.pCertInfo.contents.SerialNumber
-                        p_data = ctypes.cast(s_blob.pbData, ctypes.POINTER(ctypes.c_ubyte))
-                        serial = "".join(f"{p_data[i]:02X}" for i in range(s_blob.cbData - 1, -1, -1))
-                    result.append({"name": name, "archived": archived,
-                                   "not_before": not_before, "not_after": not_after,
-                                   "store": s_name, "serial": serial})
+                    result.append({
+                        "name": name,
+                        "serial": serial,
+                        "archived": archived,
+                        "not_before": not_before,
+                        "not_after": not_after
+                    })
                 except:
                     pass
                 curr = crypt32.CertEnumCertificatesInStore(store, curr)
@@ -560,7 +592,7 @@ class CertFilterApp(QMainWindow):
         self.config_data = {}
         self.log_lines = []
         self.sort_mode = "CN"
-        self.selected_certs: dict[str, QCheckBox] = {}  # name -> checkbox
+        self.selected_certs: dict[str, tuple] = {}  # "name|serial" -> (checkbox, name, serial)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -873,6 +905,9 @@ class CertFilterApp(QMainWindow):
             is_expired = days_left < 0
             is_expiring_soon = 0 <= days_left <= 10
 
+            # Уникальный ключ: name + serial
+            cert_key = f"{c['name']}|{c['serial']}"
+
             # Чекбокс выбора
             chk = QCheckBox()
             chk.setFixedSize(24, 24)
@@ -881,7 +916,7 @@ class CertFilterApp(QMainWindow):
                 f"border-radius:3px; background:{BG_PANEL}; }}"
                 f"QCheckBox::indicator:checked {{ background:{ACCENT}; border:1px solid {ACCENT}; }}"
             )
-            self.selected_certs[c['name']] = {"checkbox": chk, "cert": c}
+            self.selected_certs[cert_key] = (chk, c['name'], c['serial'])
             row_lay.addWidget(chk)
 
             btn_tgl = QPushButton('■' if c['archived'] else '○')
@@ -906,10 +941,15 @@ class CertFilterApp(QMainWindow):
             btn_cer.setStyleSheet(f"background:{BG_PANEL}; border:1px solid {BORDER}; color:{ACCENT2}; font-size:9px; font-weight:bold;")
             btn_cer.setToolTip("Экспорт .cer (без закрытого ключа)")
             btn_cer.clicked.connect(lambda ch, n=c['name']: self._on_export_cer(n))
+            btn_rm_cert = QPushButton("DEL C")
+            btn_rm_cert.setFixedSize(36, 28)
+            btn_rm_cert.setStyleSheet(f"background:{BG_PANEL}; border:1px solid {DANGER}; color:{DANGER}; font-size:8px; font-weight:bold;")
+            btn_rm_cert.clicked.connect(lambda ch, n=c['name'], s=c['serial']: self._on_remove_cert_only(n, s))
+            btn_rm_cert.setToolTip("Удалить только сертификат (закрытый ключ оставить)")
             btn_rm = QPushButton("DEL")
             btn_rm.setFixedSize(36, 28)
             btn_rm.setStyleSheet(f"background:{BG_PANEL}; border:1px solid {DANGER}; color:{DANGER}; font-size:9px; font-weight:bold;")
-            btn_rm.clicked.connect(lambda ch, cert=c: self._on_remove_cert(cert))
+            btn_rm.clicked.connect(lambda ch, n=c['name'], s=c['serial']: self._on_remove_cert(n, s))
             btn_rm.setToolTip("Удалить сертификат и КЛЮЧ")
 
             # Цвет текста и фона строки в зависимости от срока
@@ -935,6 +975,7 @@ class CertFilterApp(QMainWindow):
             row_lay.addWidget(btn_edt)
             row_lay.addWidget(btn_exp)
             row_lay.addWidget(btn_cer)
+            row_lay.addWidget(btn_rm_cert)
             row_lay.addWidget(btn_rm)
             row_lay.addWidget(info, 1)
             row.setStyleSheet(f"background:{row_bg}; border-bottom:1px solid {BORDER};")
@@ -1040,12 +1081,12 @@ class CertFilterApp(QMainWindow):
 
     def _on_select_all(self, state: bool):
         """Установить/снять все галочки."""
-        for data in self.selected_certs.values():
-            data["checkbox"].setChecked(state)
+        for chk_tuple in self.selected_certs.values():
+            chk_tuple[0].setChecked(state)
 
     def _on_export_selected(self):
         """Экспортировать все отмеченные сертификаты в один PFX."""
-        names = [n for n, chk in self.selected_certs.items() if chk.isChecked()]
+        names = [t[1] for t in self.selected_certs.values() if t[0].isChecked()]
         if not names:
             QMessageBox.warning(self, "Нет выбранных", "Отметьте галочкой хотя бы один сертификат.")
             return
@@ -1086,23 +1127,38 @@ class CertFilterApp(QMainWindow):
             else:
                 QMessageBox.critical(self, "Ошибка", "Ошибка импорта. Проверьте пароль.")
 
-    def _on_remove_cert(self, cert):
-        rep = QMessageBox.warning(self, "УДАЛЕНИЕ", f"Вы уверены, что хотите УДАЛИТЬ сертификат '{cert['name']}' и его ЗАКРЫТЫЙ КЛЮЧ?\nЭто действие необратимо!", 
+    def _on_remove_cert_only(self, name, serial):
+        rep = QMessageBox.warning(
+            self, "УДАЛЕНИЕ СЕРТИФИКАТА",
+            f"Удалить сертификат '{name}' БЕЗ закрытого ключа?\n"
+            f"Контейнер закрытого ключа останется в системе.\n"
+            f"Это действие необратимо!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if rep == QMessageBox.StandardButton.Yes:
+            if delete_cert_only(name, serial):
+                self._log(f"Сертификат удалён, ключ оставлен: {name}", DANGER)
+                self._load_certs()
+            else:
+                self._log("Ошибка удаления сертификата", DANGER)
+
+    def _on_remove_cert(self, name, serial):
+        rep = QMessageBox.warning(self, "УДАЛЕНИЕ", f"Вы уверены, что хотите УДАЛИТЬ сертификат '{name}' и его ЗАКРЫТЫЙ КЛЮЧ?\nЭто действие необратимо!", 
                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if rep == QMessageBox.StandardButton.Yes:
-            if delete_cert_and_key(cert['store'], cert['serial']):
-                self._log(f"Удалено: {cert['name']}", DANGER)
+            if delete_cert_and_key(name, serial):
+                self._log(f"Удалено: {name}", DANGER)
                 self._load_certs()
             else:
                 self._log("Ошибка удаления", DANGER)
 
     def _on_delete_selected(self):
         """Удалить все отмеченные галочкой сертификаты и их закрытые ключи."""
-        selected = [data["cert"] for data in self.selected_certs.values() if data["checkbox"].isChecked()]
+        selected = [(t[1], t[2]) for t in self.selected_certs.values() if t[0].isChecked()]
         if not selected:
             QMessageBox.warning(self, "Нет выбранных", "Отметьте галочкой хотя бы один сертификат.")
             return
-        list_text = "\n".join(f"• {c['name']}" for c in selected)
+        list_text = "\n".join(f"• {n}" for n, _ in selected)
         rep = QMessageBox.warning(
             self, "УДАЛЕНИЕ ВЫБРАННЫХ",
             f"Вы уверены, что хотите УДАЛИТЬ {len(selected)} сертификат(а/ов) "
@@ -1113,8 +1169,8 @@ class CertFilterApp(QMainWindow):
             return
         ok_count = 0
         fail_count = 0
-        for cert in selected:
-            if delete_cert_and_key(cert['store'], cert['serial']):
+        for name, serial in selected:
+            if delete_cert_and_key(name, serial):
                 ok_count += 1
             else:
                 fail_count += 1

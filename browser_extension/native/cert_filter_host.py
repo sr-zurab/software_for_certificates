@@ -635,58 +635,62 @@ def toggle_cert_archive(name: str):
     return False
 
 
-def delete_cert_and_key(store_name: str, serial: str):
+def get_cert_serial(cert) -> str:
+    ctx = CERT_CONTEXT.from_address(cert)
+    if not ctx.pCertInfo:
+        return ""
+    s_blob = ctx.pCertInfo.contents.SerialNumber
+    p_data = ctypes.cast(s_blob.pbData, ctypes.POINTER(ctypes.c_ubyte))
+    return "".join(f"{p_data[i]:02X}" for i in range(s_blob.cbData - 1, -1, -1))
+
+
+def delete_cert_and_key(name: str, serial: str = ""):
     _ensure_crypto()
-    store = None
-    try:
-        flags = (
-            CERT_SYSTEM_STORE_CURRENT_USER
-            | CERT_STORE_OPEN_EXISTING_FLAG
-            | CERT_STORE_MAXIMUM_ALLOWED_FLAG
-            | CERT_STORE_ENUM_ARCHIVED_FLAG
-        )
-        store = crypt32.CertOpenStore(
-            ctypes.c_void_p(CERT_STORE_PROV_SYSTEM),
-            0,
-            None,
-            flags,
-            ctypes.c_wchar_p(store_name),
-        )
-        if not store:
-            return False
-        for cert in iter_certs(store):
-            ctx = CERT_CONTEXT.from_address(cert)
-            if not ctx.pCertInfo:
-                continue
-            s_blob = ctx.pCertInfo.contents.SerialNumber
-            p_data = ctypes.cast(s_blob.pbData, ctypes.POINTER(ctypes.c_ubyte))
-            cert_serial = "".join(
-                f"{p_data[i]:02X}" for i in range(s_blob.cbData - 1, -1, -1)
+    for store_name in ("MY", "AddressBook"):
+        store = None
+        try:
+            flags = (
+                CERT_SYSTEM_STORE_CURRENT_USER
+                | CERT_STORE_OPEN_EXISTING_FLAG
+                | CERT_STORE_MAXIMUM_ALLOWED_FLAG
+                | CERT_STORE_ENUM_ARCHIVED_FLAG
             )
-            if cert_serial != serial:
+            store = crypt32.CertOpenStore(
+                ctypes.c_void_p(CERT_STORE_PROV_SYSTEM),
+                0,
+                None,
+                flags,
+                ctypes.c_wchar_p(store_name),
+            )
+            if not store:
                 continue
-            size = ctypes.c_uint32(0)
-            if crypt32.CertGetCertificateContextProperty(
-                cert, CERT_KEY_PROV_INFO_PROP_ID, None, ctypes.byref(size)
-            ):
-                buf = ctypes.create_string_buffer(size.value)
+            for cert in iter_certs(store):
+                if get_name(cert) != name:
+                    continue
+                if serial and get_cert_serial(cert) != serial:
+                    continue
+                size = ctypes.c_uint32(0)
                 if crypt32.CertGetCertificateContextProperty(
-                    cert, CERT_KEY_PROV_INFO_PROP_ID, buf, ctypes.byref(size)
+                    cert, CERT_KEY_PROV_INFO_PROP_ID, None, ctypes.byref(size)
                 ):
-                    info = CRYPT_KEY_PROV_INFO.from_buffer(buf)
-                    h_prov = ctypes.c_void_p()
-                    advapi32.CryptAcquireContextW(
-                        ctypes.byref(h_prov),
-                        info.pwszContainerName,
-                        info.pwszProvName,
-                        info.dwProvType,
-                        CRYPT_DELETEKEYSET,
-                    )
-            dup = crypt32.CertDuplicateCertificateContext(cert)
-            return bool(crypt32.CertDeleteCertificateFromStore(dup))
-    finally:
-        if store:
-            crypt32.CertCloseStore(store, 0)
+                    buf = ctypes.create_string_buffer(size.value)
+                    if crypt32.CertGetCertificateContextProperty(
+                        cert, CERT_KEY_PROV_INFO_PROP_ID, buf, ctypes.byref(size)
+                    ):
+                        info = CRYPT_KEY_PROV_INFO.from_buffer(buf)
+                        h_prov = ctypes.c_void_p()
+                        advapi32.CryptAcquireContextW(
+                            ctypes.byref(h_prov),
+                            info.pwszContainerName,
+                            info.pwszProvName,
+                            info.dwProvType,
+                            CRYPT_DELETEKEYSET,
+                        )
+                dup = crypt32.CertDuplicateCertificateContext(cert)
+                return bool(crypt32.CertDeleteCertificateFromStore(dup))
+        finally:
+            if store:
+                crypt32.CertCloseStore(store, 0)
     return False
 
 
@@ -861,11 +865,11 @@ def handle(message):
         return {"ok": True, "cert": details}
 
     if action == "delete_cert":
-        store_name = message.get("store")
-        serial = message.get("serial")
-        if not store_name or not serial:
-            raise ValueError("Нужны store и serial")
-        deleted = delete_cert_and_key(store_name, serial)
+        name = message.get("name")
+        serial = message.get("serial", "")
+        if not name:
+            raise ValueError("Не указано имя сертификата")
+        deleted = delete_cert_and_key(name, serial)
         return {"ok": bool(deleted), "deleted": bool(deleted)}
 
     raise ValueError(f"Неизвестное действие: {action}")

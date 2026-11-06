@@ -449,14 +449,14 @@ inn_val = find_oid(full_subject_str, [
 
 ---
 
-### `delete_cert_and_key(name: str) → bool` — строка 260
+### `delete_cert_and_key(name: str, serial: str = "") → bool` — строка 262
 
 Удаляет сертификат из хранилища **вместе с контейнером закрытого ключа**.
 
 **⚠️ НЕОБРАТИМАЯ ОПЕРАЦИЯ!**
 
 **Алгоритм:**
-1. Находит сертификат по CN в хранилищах `MY` / `AddressBook`
+1. Находит сертификат по CN (и серийному номеру, если он задан) в хранилищах `MY` / `AddressBook`
 2. Читает `CERT_KEY_PROV_INFO_PROP_ID` — информацию о контейнере ключа
 3. Вызывает `CryptAcquireContextW` с флагом `CRYPT_DELETEKEYSET` — удаляет контейнер
 4. Дублирует контекст сертификата (`CertDuplicateCertificateContext`)
@@ -468,7 +468,19 @@ inn_val = find_oid(full_subject_str, [
 
 ---
 
-### `export_pfx(name: str, path: str, password: str) → bool` — строка 287
+### `delete_cert_only(name: str, serial: str = "") → bool` — строка 293
+
+Удаляет сертификат из хранилища, **не удаляя контейнер закрытого ключа**.
+
+**Алгоритм:**
+1. Находит сертификат по CN (и серийному номеру, если он задан) в хранилищах `MY` / `AddressBook`
+2. Дублирует контекст сертификата (`CertDuplicateCertificateContext`)
+3. Удаляет сертификат из хранилища (`CertDeleteCertificateFromStore`)
+4. Контейнер закрытого ключа остаётся в системе
+
+---
+
+### `export_pfx(name: str, path: str, password: str) → bool` — строка 315
 
 Экспортирует сертификат с закрытым ключом в файл формата PFX/PKCS#12.
 
