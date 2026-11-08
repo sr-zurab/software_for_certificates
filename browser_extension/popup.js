@@ -9,9 +9,9 @@ const STORAGE_KEY = "certFilterPopupState";
 let hostReady = false;
 let configData = null;
 let configLabel = "";
-let fileConfigData = null;
-let fileConfigName = "";
-let lastConfigName = "";
+let fileConfigs = [];
+const FILE_VALUE_PREFIX = "__file__:";
+let hiddenConfigs = [];
 let certs = [];
 let logs = [];
 
@@ -23,6 +23,8 @@ document.addEventListener("DOMContentLoaded", () => {
     "configSelect",
     "configInfo",
     "fileInput",
+    "deleteConfigBtn",
+    "restoreConfigsBtn",
     "keyInput",
     "applyBtn",
     "resolved",
@@ -49,8 +51,10 @@ function bindEvents() {
   els.refreshBtn.addEventListener("click", refreshAll);
   els.configSelect.addEventListener("change", () => {
     const name = els.configSelect.value;
-    if (name === "__file__") {
-      selectFileConfig();
+    updateDeleteButton();
+    const fileEntry = findFileConfigByValue(name);
+    if (fileEntry) {
+      selectFileConfig(fileEntry);
       return;
     }
     if (name) {
@@ -58,10 +62,17 @@ function bindEvents() {
         .catch((error) => log(error.message, "bad"))
         .finally(() => writeState());
     } else {
+      configData = null;
+      configLabel = "";
+      els.configInfo.textContent = "Конфиг не выбран. Выберите JSON из списка.";
+      els.configInfo.className = "hint";
+      updateResolved();
       writeState();
     }
   });
   els.fileInput.addEventListener("change", onFileChosen);
+  els.deleteConfigBtn.addEventListener("click", deleteCurrentConfig);
+  els.restoreConfigsBtn.addEventListener("click", restoreHiddenConfigs);
   els.keyInput.addEventListener("input", () => {
     updateResolved();
     writeState();
@@ -85,28 +96,75 @@ function bindEvents() {
 
 async function init() {
   const saved = await readState();
-  lastConfigName = typeof saved.config === "string" ? saved.config : "";
+  if (Array.isArray(saved.hidden)) {
+    hiddenConfigs = saved.hidden.filter(
+      (item) => typeof item === "string" && item
+    );
+  }
   if (typeof saved.key === "string") els.keyInput.value = saved.key;
   if (typeof saved.search === "string") els.certSearch.value = saved.search;
-  if (saved.file && saved.file.data && typeof saved.file.data === "object") {
-    fileConfigData = saved.file.data;
-    fileConfigName =
-      typeof saved.file.name === "string" && saved.file.name
-        ? saved.file.name
-        : "custom.json";
-    ensureFileOption();
-  }
+  loadSavedFileConfigs(saved);
   updateResolved();
+
+  let restored = typeof saved.config === "string" ? saved.config : "";
+  if (restored === "__file__") {
+    restored = fileConfigs.length ? fileOptionValue(fileConfigs[0]) : "";
+  }
 
   log("Подключение к native host...", "info");
   if (!(await connectHost())) {
-    if (fileConfigData && saved.config === "__file__") {
-      selectFileConfig();
-    }
+    const restoredFile = findFileConfigByValue(restored);
+    if (restoredFile) selectFileConfig(restoredFile);
     return;
   }
-  await loadConfigs(typeof saved.config === "string" ? saved.config : "");
+  await loadConfigs(restored);
   await loadCerts();
+}
+
+function makeFileId() {
+  return `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeFileConfig(item) {
+  if (!item || !item.data || typeof item.data !== "object") return null;
+  const data = {};
+  for (const [key, value] of Object.entries(item.data)) {
+    if (typeof value === "string") data[key] = value;
+  }
+  return {
+    id: typeof item.id === "string" && item.id ? item.id : makeFileId(),
+    name: typeof item.name === "string" && item.name ? item.name : "custom.json",
+    data,
+  };
+}
+
+function loadSavedFileConfigs(saved) {
+  fileConfigs = [];
+  const usedIds = new Set();
+  const add = (item) => {
+    const entry = normalizeFileConfig(item);
+    if (!entry) return;
+    if (usedIds.has(entry.id)) entry.id = makeFileId();
+    usedIds.add(entry.id);
+    fileConfigs.push(entry);
+  };
+
+  if (Array.isArray(saved.files)) {
+    for (const item of saved.files) add(item);
+  }
+  if (!fileConfigs.length && saved.file) add(saved.file);
+}
+
+function fileOptionValue(entry) {
+  return `${FILE_VALUE_PREFIX}${entry.id}`;
+}
+
+function findFileConfigByValue(value) {
+  if (!value) return null;
+  if (value === "__file__") return fileConfigs[0] || null;
+  if (!value.startsWith(FILE_VALUE_PREFIX)) return null;
+  const id = value.slice(FILE_VALUE_PREFIX.length);
+  return fileConfigs.find((entry) => entry.id === id) || null;
 }
 
 async function refreshAll() {
@@ -149,15 +207,25 @@ async function loadConfigs(preferred = "") {
   const previous = els.configSelect.value;
   try {
     const response = await sendBg({ action: "get_configs" });
-    const list = Array.isArray(response.configs) ? response.configs : [];
+    const allConfigs = Array.isArray(response.configs) ? response.configs : [];
+    const list = allConfigs.filter((item) => {
+      const name = typeof item === "string" ? item : item && item.name;
+      return !!name && !hiddenConfigs.includes(name);
+    });
     populateConfigs(list);
 
-    const wantsFile =
-      preferred === "__file__" || (!preferred && previous === "__file__");
-    if (wantsFile && fileConfigData) {
-      selectFileConfig();
-      log(`Загружен сохранённый JSON: ${fileConfigName}`, "info");
+    const preferredFile = findFileConfigByValue(preferred);
+    if (preferredFile) {
+      selectFileConfig(preferredFile);
+      log(`Загружен сохранённый JSON: ${preferredFile.name}`, "info");
       return;
+    }
+    if (!preferred) {
+      const previousFile = findFileConfigByValue(previous);
+      if (previousFile) {
+        selectFileConfig(previousFile);
+        return;
+      }
     }
 
     if (list.length) {
@@ -169,18 +237,31 @@ async function loadConfigs(preferred = "") {
         ? preferred
         : names.includes(previous)
         ? previous
-        : names[0];
+        : "";
+      if (!wanted) {
+        showNoConfigOption();
+        configData = null;
+        configLabel = "";
+        els.configInfo.textContent = "Конфиг не выбран. Выберите JSON из списка.";
+        els.configInfo.className = "hint";
+        updateResolved();
+        writeState();
+        log(`Конфигов найдено: ${list.length}`, "info");
+        return;
+      }
       els.configSelect.value = wanted;
-      lastConfigName = wanted;
       await loadConfig(wanted);
       writeState();
       log(`Конфигов найдено: ${list.length}`, "info");
-    } else if (fileConfigData) {
-      selectFileConfig();
     } else {
       configData = null;
       configLabel = "";
-      els.configInfo.textContent = "JSON-файлы не найдены. Загрузите файл вручную.";
+      showNoConfigOption();
+      els.configInfo.textContent = hiddenConfigs.length
+        ? `Все конфиги скрыты (${hiddenConfigs.length}). Нажмите «вернуть», чтобы показать их снова.`
+        : fileConfigs.length
+        ? "Нет конфигов в каталоге. Выберите загруженный JSON из списка или загрузите новый."
+        : "JSON-файлы не найдены. Загрузите файл вручную.";
       updateResolved();
       writeState();
     }
@@ -191,53 +272,148 @@ async function loadConfigs(preferred = "") {
 
 function populateConfigs(list) {
   els.configSelect.replaceChildren();
-  if (!list.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "— нет доступных JSON —";
-    els.configSelect.append(option);
-  } else {
-    for (const item of list) {
-      const name = typeof item === "string" ? item : item && item.name;
-      if (!name) continue;
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      if (item && typeof item.key_count === "number") {
-        option.dataset.keys = String(item.key_count);
-      }
-      els.configSelect.append(option);
-    }
-  }
-  ensureFileOption();
-}
 
-function ensureFileOption() {
-  if (!fileConfigData) return;
-  const existing = els.configSelect.querySelector('option[value="__file__"]');
-  if (existing) {
-    existing.textContent = `📄 ${fileConfigName}`;
-    return;
-  }
   const option = document.createElement("option");
-  option.value = "__file__";
-  option.textContent = `📄 ${fileConfigName}`;
+  option.value = "";
+  option.textContent =
+    list.length || fileConfigs.length
+      ? "— выберите конфиг —"
+      : hiddenConfigs.length
+      ? "— все конфиги скрыты —"
+      : "— нет доступных JSON —";
   els.configSelect.append(option);
+
+  for (const item of list) {
+    const name = typeof item === "string" ? item : item && item.name;
+    if (!name) continue;
+    const itemOption = document.createElement("option");
+    itemOption.value = name;
+    itemOption.textContent = name;
+    if (item && typeof item.key_count === "number") {
+      itemOption.dataset.keys = String(item.key_count);
+    }
+    els.configSelect.append(itemOption);
+  }
+
+  ensureFileOptions();
+  updateDeleteButton();
 }
 
-function selectFileConfig() {
-  if (!fileConfigData) return;
-  ensureFileOption();
-  els.configSelect.value = "__file__";
-  lastConfigName = "__file__";
-  configData = fileConfigData;
-  configLabel = fileConfigName;
-  els.configInfo.textContent = `${fileConfigName} · ключей: ${
-    Object.keys(fileConfigData).length
+function ensureFileOptions() {
+  for (const entry of fileConfigs) {
+    const value = fileOptionValue(entry);
+    let existing = null;
+    for (const option of els.configSelect.options) {
+      if (option.value === value) {
+        existing = option;
+        break;
+      }
+    }
+    if (existing) {
+      existing.textContent = `📄 ${entry.name}`;
+      continue;
+    }
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = `📄 ${entry.name}`;
+    els.configSelect.append(option);
+  }
+}
+
+function selectFileConfig(entry) {
+  if (!entry) return;
+  ensureFileOptions();
+  els.configSelect.value = fileOptionValue(entry);
+  configData = entry.data;
+  configLabel = entry.name;
+  els.configInfo.textContent = `${entry.name} · ключей: ${
+    Object.keys(entry.data).length
   }`;
   els.configInfo.className = "hint";
   updateResolved();
   writeState();
+}
+
+function updateDeleteButton() {
+  if (els.deleteConfigBtn) {
+    els.deleteConfigBtn.disabled = !els.configSelect.value;
+  }
+  if (els.restoreConfigsBtn) {
+    els.restoreConfigsBtn.hidden = hiddenConfigs.length === 0;
+    els.restoreConfigsBtn.textContent = `вернуть (${hiddenConfigs.length})`;
+    els.restoreConfigsBtn.title = `Вернуть скрытые конфиги: ${hiddenConfigs.length}`;
+  }
+}
+
+function restoreHiddenConfigs() {
+  if (!hiddenConfigs.length) return;
+  hiddenConfigs = [];
+  log("Скрытые конфиги возвращены в список", "good");
+  writeState();
+  if (hostReady) {
+    loadConfigs().catch((error) => log(error.message, "bad"));
+  } else {
+    els.configInfo.textContent = "Нет соединения с native host";
+    els.configInfo.className = "hint bad";
+  }
+}
+
+function deleteCurrentConfig() {
+  const name = els.configSelect.value;
+  const fileEntry = findFileConfigByValue(name);
+  const isFile = !!fileEntry;
+  if (!name && !configData && !fileConfigs.length) {
+    log("Нет загруженного конфига", "bad");
+    return;
+  }
+
+  const label = isFile ? fileEntry.name : configLabel || name;
+  const message = isFile
+    ? `Удалить сохранённую в расширении копию конфига «${label}»? Исходный файл на диске останется.`
+    : `Удалить конфиг «${label}» из расширения? JSON-файл на диске останется без изменений.`;
+  if (!window.confirm(message)) return;
+
+  if (isFile) {
+    fileConfigs = fileConfigs.filter((entry) => entry !== fileEntry);
+  } else if (name && !hiddenConfigs.includes(name)) {
+    hiddenConfigs.push(name);
+  }
+  configData = null;
+  configLabel = "";
+
+  for (const option of Array.from(els.configSelect.options)) {
+    if (option.value === name) option.remove();
+  }
+  showNoConfigOption();
+  els.configInfo.textContent = isFile
+    ? "Сохранённая копия удалена из расширения. Исходный файл не изменён."
+    : "Конфиг скрыт в расширении. JSON-файл на диске не изменён.";
+  els.configInfo.className = "hint";
+  updateResolved();
+  writeState();
+  log(
+    isFile
+      ? "Сохранённая копия конфига удалена из расширения"
+      : `Конфиг «${label}» скрыт в расширении`,
+    "good"
+  );
+}
+
+function showNoConfigOption() {
+  let placeholder = null;
+  for (const option of els.configSelect.options) {
+    if (option.value === "") {
+      placeholder = option;
+      break;
+    }
+  }
+  if (!placeholder) {
+    placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "— конфиг не выбран —";
+    els.configSelect.prepend(placeholder);
+  }
+  els.configSelect.value = "";
 }
 
 function readState() {
@@ -260,13 +436,17 @@ function readState() {
 }
 
 function writeState() {
+  updateDeleteButton();
   const state = {
-    config: els.configSelect.value || lastConfigName || "",
+    config: els.configSelect.value || "",
     key: els.keyInput.value || "",
     search: els.certSearch.value || "",
-    file: fileConfigData
-      ? { name: fileConfigName, data: fileConfigData }
-      : null,
+    files: fileConfigs.map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      data: entry.data,
+    })),
+    hidden: hiddenConfigs,
   };
   try {
     const maybe = api.storage.local.set({ [STORAGE_KEY]: state });
@@ -299,35 +479,42 @@ async function loadConfig(name) {
 }
 
 async function onFileChosen() {
-  const file = els.fileInput.files && els.fileInput.files[0];
-  if (!file) return;
-  try {
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    const clean = {};
-    for (const [key, value] of Object.entries(parsed || {})) {
-      if (typeof value === "string") clean[key] = value;
+  const files = Array.from(els.fileInput.files || []);
+  if (!files.length) return;
+
+  const loaded = [];
+  for (const file of files) {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const clean = {};
+      for (const [key, value] of Object.entries(parsed || {})) {
+        if (typeof value === "string") clean[key] = value;
+      }
+      let entry = fileConfigs.find((item) => item.name === file.name);
+      if (entry) {
+        entry.data = clean;
+      } else {
+        entry = { id: makeFileId(), name: file.name, data: clean };
+        fileConfigs.push(entry);
+      }
+      loaded.push(entry);
+    } catch (error) {
+      log(`Ошибка JSON (${file.name}): ${error.message}`, "bad");
     }
-    configData = clean;
-    configLabel = file.name;
-    fileConfigData = clean;
-    fileConfigName = file.name;
-    const count = Object.keys(clean).length;
-
-    ensureFileOption();
-    els.configSelect.value = "__file__";
-    lastConfigName = "__file__";
-
-    els.configInfo.textContent = `${file.name} · ключей: ${count}`;
-    els.configInfo.className = "hint";
-    log(`Загружен файл ${file.name}`, "info");
-    updateResolved();
-    writeState();
-  } catch (error) {
-    log(`Ошибка JSON: ${error.message}`, "bad");
-  } finally {
-    els.fileInput.value = "";
   }
+
+  if (loaded.length) {
+    ensureFileOptions();
+    selectFileConfig(loaded[loaded.length - 1]);
+    log(
+      loaded.length > 1
+        ? `Загружено JSON-файлов: ${loaded.length}`
+        : `Загружен файл ${loaded[0].name}`,
+      "info"
+    );
+  }
+  els.fileInput.value = "";
 }
 
 function findValue(key) {
@@ -342,10 +529,13 @@ function findValue(key) {
 
 function updateResolved() {
   const key = els.keyInput.value.trim();
+  if (!configData) {
+    els.resolved.textContent = "Конфиг не выбран";
+    els.resolved.className = "hint";
+    return;
+  }
   if (!key) {
-    els.resolved.textContent = configData
-      ? `Ключей в конфиге: ${Object.keys(configData).length}`
-      : "";
+    els.resolved.textContent = `Ключей в конфиге: ${Object.keys(configData).length}`;
     els.resolved.className = "hint";
     return;
   }

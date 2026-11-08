@@ -23,23 +23,23 @@ fi
 echo "Python: $PYTHON_BIN"
 echo "Каталог установки: $INSTALL_DIR"
 
-mkdir -p "$INSTALL_DIR/configs"
+mkdir -p "$INSTALL_DIR"
 install -m 755 "$SCRIPT_DIR/cert_filter_host.py" "$INSTALL_DIR/cert_filter_host.py"
 install -m 755 "$SCRIPT_DIR/run_host.sh" "$INSTALL_DIR/run_host.sh"
 
-copied=0
+# Конфиги читаются напрямую из папки проекта, копии не создаются.
+printf '%s\n' "$PROJECT_ROOT" > "$INSTALL_DIR/config_dir.txt"
+chmod 644 "$INSTALL_DIR/config_dir.txt"
+
 shopt -s nullglob
-for file in "$PROJECT_ROOT"/config_*.json; do
-  cp -f "$file" "$INSTALL_DIR/configs/"
-  copied=$((copied + 1))
-done
+project_configs=("$PROJECT_ROOT"/config_*.json)
 shopt -u nullglob
 
-if [ "$copied" -eq 0 ]; then
+if [ "${#project_configs[@]}" -eq 0 ]; then
   echo "Внимание: config_*.json не найдены в $PROJECT_ROOT" >&2
-  echo "          Скопируйте JSON-конфиги в $INSTALL_DIR/configs/" >&2
+  echo "          Конфиги будут читаться из папки проекта." >&2
 else
-  echo "Скопировано конфигов: $copied"
+  echo "Папка конфигов: $PROJECT_ROOT (${#project_configs[@]} JSON)"
 fi
 
 HOST_MANIFEST="$INSTALL_DIR/$HOST_NAME.json"

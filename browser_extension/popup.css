@@ -256,6 +256,47 @@ button.ghost-red:hover {
   color: var(--warn);
 }
 
+.config-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mini-btn {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.mini-btn.danger {
+  color: var(--danger);
+}
+
+.mini-btn.accent {
+  color: var(--accent);
+}
+
+.mini-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.mini-btn.accent:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.mini-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .mini-file {
   position: relative;
   overflow: hidden;

@@ -49,7 +49,7 @@ popup расширения  ->  background.js  ->  native host (Python)  ->  Cry
 
    Скрипт:
    - копирует host в `~/.local/share/cert-filter-host` (или `$XDG_DATA_HOME/cert-filter-host`);
-   - копирует `config_fl.json` и `config_ul.json` в `~/.local/share/cert-filter-host/configs`;
+   - записывает путь к папке проекта в `config_dir.txt` — конфиги читаются напрямую из папки проекта;
    - создаёт manifest native host;
    - регистрирует host для найденных браузеров:
      - `~/.config/google-chrome/NativeMessagingHosts/`
@@ -107,7 +107,7 @@ cp ~/.local/share/cert-filter-host/com.certfilter.host.json \
 
    Скрипт:
    - копирует host в `%LOCALAPPDATA%\CertFilterHost`;
-   - копирует `config_*.json` в `%LOCALAPPDATA%\CertFilterHost\configs`;
+   - записывает путь к папке проекта в `config_dir.txt` — конфиги читаются напрямую из папки проекта;
    - создаёт manifest native host;
    - прописывает ключи реестра для Chrome, Chromium, Chromium-GOST, Edge, Brave, Vivaldi, Yandex Browser, Opera и Firefox.
 
@@ -173,7 +173,8 @@ cp ~/.mozilla/native-messaging-hosts/com.certfilter.host.json \
 
 1. Нажмите на иконку расширения.
 2. В поле **«Конфигурация (JSON)»** выберите `config_fl.json` или `config_ul.json`.
-   - Кнопка **«загрузить»** позволяет открыть произвольный JSON-файл с компьютера.
+   - Кнопка **«загрузить»** позволяет открыть один или несколько JSON-файлов с компьютера.
+   - Кнопка **«удалить»** убирает конфиг из расширения: файл из каталога скрывается из списка, а у загруженного вручную JSON стирается сохранённая копия. Сами JSON-файлы на диске не изменяются. Скрытые конфиги из каталога можно вернуть кнопкой **«вернуть»**.
 3. Введите ключ, например `1` или `ддо1`.
 4. Нажмите **OK** или клавишу Enter.
 5. Результат отобразится в журнале:
@@ -187,7 +188,7 @@ cp ~/.mozilla/native-messaging-hosts/com.certfilter.host.json \
    - поиск по CN;
    - кнопка `■` / `○` скрывает или показывает отдельный сертификат.
 
-Выбранный JSON, загруженный вручную файл, введённый ключ и строка поиска сохраняются в браузере и восстанавливаются при следующем открытии расширения.
+Загруженный вручную файл, выбранный конфиг, введённый ключ и строка поиска сохраняются в браузере и восстанавливаются при следующем открытии расширения. Если конфиг ещё ни разу не выбирали, автоматически ничего не загружается — выберите JSON в списке вручную.
 
 Фильтр не удаляет сертификаты и ключи. Он только меняет флаг архивности, как и `cert_filter_ui.pyw`.
 
@@ -205,14 +206,11 @@ cp ~/.mozilla/native-messaging-hosts/com.certfilter.host.json \
 
 Ключ — то, что вы вводите в поле «КЛЮЧ». Значение — CN сертификата (или его часть).
 
-При установке файлы `config_fl.json` и `config_ul.json` копируются в каталог host:
+Конфиги автоматически читаются только из папки проекта — той, где лежат `config_fl.json` и `config_ul.json`. Установщик записывает этот путь в файл `config_dir.txt` рядом с native host.
 
-- Linux: `~/.local/share/cert-filter-host/configs/`
-- Windows: `%LOCALAPPDATA%\CertFilterHost\configs\`
+Поэтому добавление, изменение и удаление JSON в папке проекта сразу отражается в расширении после обновления списка. Копии в `~/.local/share/cert-filter-host/configs/` и `%LOCALAPPDATA%\CertFilterHost\configs\` больше не используются.
 
-Если вы изменили JSON в каталоге проекта, повторно запустите установщик или скопируйте файлы в каталог `configs` вручную.
-
-Можно указать свой каталог через переменную окружения `CERT_FILTER_CONFIG_DIR`. На Linux браузер должен быть запущен из терминала, чтобы увидеть переменную:
+Можно указать свой каталог через переменную окружения `CERT_FILTER_CONFIG_DIR` (она имеет приоритет). На Linux браузер должен быть запущен из терминала, чтобы увидеть переменную:
 
 ```bash
 export CERT_FILTER_CONFIG_DIR=/путь/к/конфигам
@@ -274,8 +272,8 @@ py -3 "%LOCALAPPDATA%\CertFilterHost\cert_filter_host.py" --selftest
 
 ### Пустой список конфигов
 
-- Убедитесь, что `config_fl.json` и `config_ul.json` лежат в корне проекта перед запуском `install.sh` / `install.bat`.
-- Либо скопируйте их вручную в каталог `configs` host.
+- Убедитесь, что `config_fl.json` и `config_ul.json` лежат в корне проекта (папке, путь к которой записан в `config_dir.txt`).
+- Проверьте путь к папке конфигов командой `--selftest` (см. выше).
 
 ### Пустой список сертификатов
 

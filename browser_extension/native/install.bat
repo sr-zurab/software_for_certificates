@@ -28,13 +28,16 @@ if %errorlevel%==0 (
 )
 
 echo Каталог установки: %INSTALL_DIR%
-if not exist "%INSTALL_DIR%\configs" mkdir "%INSTALL_DIR%\configs"
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 
 copy /Y "%SCRIPT_DIR%cert_filter_host.py" "%INSTALL_DIR%\" >nul
 if errorlevel 1 exit /b 1
 copy /Y "%SCRIPT_DIR%run_host.bat" "%INSTALL_DIR%\" >nul
 if errorlevel 1 exit /b 1
-copy /Y "%PROJECT_ROOT%\config_*.json" "%INSTALL_DIR%\configs\" >nul
+
+rem Конфиги читаются напрямую из папки проекта, копии не создаются.
+> "%INSTALL_DIR%\config_dir.txt" echo %PROJECT_ROOT%
+echo Папка конфигов: %PROJECT_ROOT%
 
 set "HOST_JSON=%INSTALL_DIR%\%HOST_NAME%.json"
 set "FF_JSON=%INSTALL_DIR%\%HOST_NAME%.firefox.json"

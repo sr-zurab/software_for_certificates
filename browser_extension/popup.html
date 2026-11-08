@@ -22,10 +22,35 @@
     <section class="block">
       <div class="block-head">
         <label for="configSelect">КОНФИГУРАЦИЯ (JSON)</label>
-        <label class="mini-file" title="Загрузить свой JSON">
-          загрузить
-          <input id="fileInput" type="file" accept=".json,application/json" />
-        </label>
+        <div class="config-actions">
+          <label class="mini-file" title="Загрузить один или несколько JSON">
+            загрузить
+            <input
+              id="fileInput"
+              type="file"
+              accept=".json,application/json"
+              multiple
+            />
+          </label>
+          <button
+            id="restoreConfigsBtn"
+            class="mini-btn accent"
+            type="button"
+            title="Вернуть скрытые конфиги"
+            hidden
+          >
+            вернуть
+          </button>
+          <button
+            id="deleteConfigBtn"
+            class="mini-btn danger"
+            type="button"
+            title="Удалить данные конфига из расширения"
+            disabled
+          >
+            удалить
+          </button>
+        </div>
       </div>
       <select id="configSelect"></select>
       <div id="configInfo" class="hint"></div>

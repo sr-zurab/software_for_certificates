@@ -699,37 +699,33 @@ def delete_cert_and_key(name: str, serial: str = ""):
 
 def config_dir() -> Path:
     env = os.environ.get("CERT_FILTER_CONFIG_DIR")
-    here = Path(__file__).resolve().parent
-    candidates = []
     if env:
-        candidates.append(Path(env).expanduser())
-    candidates.extend(
-        [
-            here / "configs",
-            here.parent.parent,
-            here.parent,
-            Path.cwd(),
-        ]
-    )
+        return Path(env).expanduser()
 
-    seen = set()
-    for candidate in candidates:
-        try:
-            resolved = candidate.resolve()
-        except OSError:
-            continue
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        if resolved.is_dir():
-            try:
-                next(resolved.glob("*.json"))
-            except StopIteration:
-                continue
-            except OSError:
-                continue
-            return resolved
-    return here / "configs"
+    here = Path(__file__).resolve().parent
+
+    # Установщик записывает сюда путь к папке проекта, чтобы конфиги
+    # читались напрямую из неё, а не из копий рядом с native host.
+    pointer = here / "config_dir.txt"
+    try:
+        if pointer.is_file():
+            raw = pointer.read_bytes()
+            target = ""
+            for encoding in ("utf-8-sig", "utf-8", "cp1251", "cp866"):
+                try:
+                    target = raw.decode(encoding).strip()
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if target:
+                return Path(target).expanduser()
+    except OSError:
+        pass
+
+    configs = here / "configs"
+    if configs.is_dir():
+        return configs
+    return here.parent.parent
 
 
 def safe_config_path(name: str) -> Path:
