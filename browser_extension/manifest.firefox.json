@@ -28,5 +28,5 @@
   "background": {
     "scripts": ["background.js"]
   },
-  "permissions": ["nativeMessaging"]
+  "permissions": ["nativeMessaging", "storage"]
 }

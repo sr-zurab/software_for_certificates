@@ -5,11 +5,13 @@ const isFirefox =
 const api = globalThis.browser || globalThis.chrome;
 
 const els = {};
+const STORAGE_KEY = "certFilterPopupState";
 let hostReady = false;
 let configData = null;
 let configLabel = "";
 let fileConfigData = null;
 let fileConfigName = "";
+let lastConfigName = "";
 let certs = [];
 let logs = [];
 
@@ -48,23 +50,22 @@ function bindEvents() {
   els.configSelect.addEventListener("change", () => {
     const name = els.configSelect.value;
     if (name === "__file__") {
-      if (fileConfigData) {
-        configData = fileConfigData;
-        configLabel = fileConfigName;
-        els.configInfo.textContent = `${fileConfigName} · ключей: ${
-          Object.keys(fileConfigData).length
-        }`;
-        els.configInfo.className = "hint";
-        updateResolved();
-      }
+      selectFileConfig();
       return;
     }
     if (name) {
-      loadConfig(name).catch((error) => log(error.message, "bad"));
+      loadConfig(name)
+        .catch((error) => log(error.message, "bad"))
+        .finally(() => writeState());
+    } else {
+      writeState();
     }
   });
   els.fileInput.addEventListener("change", onFileChosen);
-  els.keyInput.addEventListener("input", updateResolved);
+  els.keyInput.addEventListener("input", () => {
+    updateResolved();
+    writeState();
+  });
   els.keyInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -75,13 +76,36 @@ function bindEvents() {
   els.showAllBtn.addEventListener("click", () => runSimpleAction("restore_all", "Все сертификаты показаны", "good"));
   els.hideAllBtn.addEventListener("click", () => runSimpleAction("hide_all", "Все сертификаты скрыты", "bad"));
   els.reloadCertsBtn.addEventListener("click", () => loadCerts());
-  els.certSearch.addEventListener("input", renderCerts);
+  els.certSearch.addEventListener("input", () => {
+    renderCerts();
+    writeState();
+  });
+  window.addEventListener("pagehide", writeState);
 }
 
 async function init() {
+  const saved = await readState();
+  lastConfigName = typeof saved.config === "string" ? saved.config : "";
+  if (typeof saved.key === "string") els.keyInput.value = saved.key;
+  if (typeof saved.search === "string") els.certSearch.value = saved.search;
+  if (saved.file && saved.file.data && typeof saved.file.data === "object") {
+    fileConfigData = saved.file.data;
+    fileConfigName =
+      typeof saved.file.name === "string" && saved.file.name
+        ? saved.file.name
+        : "custom.json";
+    ensureFileOption();
+  }
+  updateResolved();
+
   log("Подключение к native host...", "info");
-  if (!(await connectHost())) return;
-  await loadConfigs();
+  if (!(await connectHost())) {
+    if (fileConfigData && saved.config === "__file__") {
+      selectFileConfig();
+    }
+    return;
+  }
+  await loadConfigs(typeof saved.config === "string" ? saved.config : "");
   await loadCerts();
 }
 
@@ -121,27 +145,44 @@ async function connectHost() {
   }
 }
 
-async function loadConfigs() {
+async function loadConfigs(preferred = "") {
+  const previous = els.configSelect.value;
   try {
     const response = await sendBg({ action: "get_configs" });
     const list = Array.isArray(response.configs) ? response.configs : [];
     populateConfigs(list);
+
+    const wantsFile =
+      preferred === "__file__" || (!preferred && previous === "__file__");
+    if (wantsFile && fileConfigData) {
+      selectFileConfig();
+      log(`Загружен сохранённый JSON: ${fileConfigName}`, "info");
+      return;
+    }
+
     if (list.length) {
       const names = list
         .map((item) => (typeof item === "string" ? item : item && item.name))
         .filter(Boolean);
       if (!names.length) return;
-      const wanted = names.includes(els.configSelect.value)
-        ? els.configSelect.value
+      const wanted = names.includes(preferred)
+        ? preferred
+        : names.includes(previous)
+        ? previous
         : names[0];
       els.configSelect.value = wanted;
+      lastConfigName = wanted;
       await loadConfig(wanted);
+      writeState();
       log(`Конфигов найдено: ${list.length}`, "info");
+    } else if (fileConfigData) {
+      selectFileConfig();
     } else {
       configData = null;
       configLabel = "";
       els.configInfo.textContent = "JSON-файлы не найдены. Загрузите файл вручную.";
       updateResolved();
+      writeState();
     }
   } catch (error) {
     log(`Ошибка загрузки конфигов: ${error.message}`, "bad");
@@ -155,18 +196,83 @@ function populateConfigs(list) {
     option.value = "";
     option.textContent = "— нет доступных JSON —";
     els.configSelect.append(option);
+  } else {
+    for (const item of list) {
+      const name = typeof item === "string" ? item : item && item.name;
+      if (!name) continue;
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      if (item && typeof item.key_count === "number") {
+        option.dataset.keys = String(item.key_count);
+      }
+      els.configSelect.append(option);
+    }
+  }
+  ensureFileOption();
+}
+
+function ensureFileOption() {
+  if (!fileConfigData) return;
+  const existing = els.configSelect.querySelector('option[value="__file__"]');
+  if (existing) {
+    existing.textContent = `📄 ${fileConfigName}`;
     return;
   }
-  for (const item of list) {
-    const name = typeof item === "string" ? item : item && item.name;
-    if (!name) continue;
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    if (item && typeof item.key_count === "number") {
-      option.dataset.keys = String(item.key_count);
+  const option = document.createElement("option");
+  option.value = "__file__";
+  option.textContent = `📄 ${fileConfigName}`;
+  els.configSelect.append(option);
+}
+
+function selectFileConfig() {
+  if (!fileConfigData) return;
+  ensureFileOption();
+  els.configSelect.value = "__file__";
+  lastConfigName = "__file__";
+  configData = fileConfigData;
+  configLabel = fileConfigName;
+  els.configInfo.textContent = `${fileConfigName} · ключей: ${
+    Object.keys(fileConfigData).length
+  }`;
+  els.configInfo.className = "hint";
+  updateResolved();
+  writeState();
+}
+
+function readState() {
+  return new Promise((resolve) => {
+    try {
+      const maybe = api.storage.local.get(STORAGE_KEY);
+      if (maybe && typeof maybe.then === "function") {
+        maybe
+          .then((data) => resolve((data && data[STORAGE_KEY]) || {}))
+          .catch(() => resolve({}));
+        return;
+      }
+      api.storage.local.get(STORAGE_KEY, (data) => {
+        resolve((data && data[STORAGE_KEY]) || {});
+      });
+    } catch (_) {
+      resolve({});
     }
-    els.configSelect.append(option);
+  });
+}
+
+function writeState() {
+  const state = {
+    config: els.configSelect.value || lastConfigName || "",
+    key: els.keyInput.value || "",
+    search: els.certSearch.value || "",
+    file: fileConfigData
+      ? { name: fileConfigName, data: fileConfigData }
+      : null,
+  };
+  try {
+    const maybe = api.storage.local.set({ [STORAGE_KEY]: state });
+    if (maybe && typeof maybe.catch === "function") maybe.catch(() => {});
+  } catch (_) {
+    /* ignore */
   }
 }
 
@@ -208,18 +314,15 @@ async function onFileChosen() {
     fileConfigName = file.name;
     const count = Object.keys(clean).length;
 
-    const option = document.createElement("option");
-    option.value = "__file__";
-    option.textContent = `📄 ${file.name}`;
-    const existing = els.configSelect.querySelector('option[value="__file__"]');
-    if (existing) existing.remove();
-    els.configSelect.append(option);
+    ensureFileOption();
     els.configSelect.value = "__file__";
+    lastConfigName = "__file__";
 
     els.configInfo.textContent = `${file.name} · ключей: ${count}`;
     els.configInfo.className = "hint";
     log(`Загружен файл ${file.name}`, "info");
     updateResolved();
+    writeState();
   } catch (error) {
     log(`Ошибка JSON: ${error.message}`, "bad");
   } finally {

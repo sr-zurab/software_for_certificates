@@ -22,6 +22,6 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["nativeMessaging"],
+  "permissions": ["nativeMessaging", "storage"],
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp9yjzWKTfR/x2kU5Dak9EL8ivHGjkIkCU6nlW14klUiWd59egxrkSgw3zT7aCFNbUDLn+EtXPfbMKWWNcWPK9aiR3qEOHvDuMPOy/cUx/4PYjUeekC42+IhavSImjBDfZvhB7o6GZ70QchQVmNYMbZKOI0mk15f6BW6C2n5OBExL39te51ZcM2x2EY/emEHwfTD4cmKB0T6ApWMJnLbC7QKPUCp1b/5y1XZ/GBUu3xj0eTGzAi/0qlY6CV7+UCObiuVYq9VPw6VyFb9bUgNALyamn3VRiOnZ0RQ9txhIjmMgewkioam0H7HlTFwOb4ELWZqNdp9qOSqOgP5WGmcZmQIDAQAB"
 }
