@@ -644,6 +644,92 @@ def get_cert_serial(cert) -> str:
     return "".join(f"{p_data[i]:02X}" for i in range(s_blob.cbData - 1, -1, -1))
 
 
+def export_cer(name: str, path: str) -> bool:
+    """Экспорт сертификата в формате DER (.cer) без закрытого ключа."""
+    stores = ["MY", "AddressBook"]
+    for s_name in stores:
+        store = None
+        try:
+            flags = (
+                CERT_SYSTEM_STORE_CURRENT_USER
+                | CERT_STORE_OPEN_EXISTING_FLAG
+                | CERT_STORE_MAXIMUM_ALLOWED_FLAG
+                | CERT_STORE_ENUM_ARCHIVED_FLAG
+            )
+            store = crypt32.CertOpenStore(
+                ctypes.c_void_p(CERT_STORE_PROV_SYSTEM),
+                0,
+                None,
+                flags,
+                ctypes.c_wchar_p(s_name),
+            )
+            if not store:
+                continue
+            for cert in iter_certs(store):
+                if get_name(cert) == name:
+                    ctx = CERT_CONTEXT.from_address(cert)
+                    size = ctx.cbCertEncoded
+                    if size == 0:
+                        return False
+                    raw = ctypes.string_at(ctx.pbCertEncoded, size)
+                    with open(path, "wb") as f:
+                        f.write(raw)
+                    return True
+        finally:
+            if store:
+                crypt32.CertCloseStore(store, 0)
+    return False
+
+
+def export_pfx(name: str, path: str, password: str):
+    store_sys = None
+    store_mem = None
+    try:
+        flags = (
+            CERT_SYSTEM_STORE_CURRENT_USER
+            | CERT_STORE_OPEN_EXISTING_FLAG
+            | CERT_STORE_MAXIMUM_ALLOWED_FLAG
+            | CERT_STORE_ENUM_ARCHIVED_FLAG
+        )
+        store_sys = crypt32.CertOpenStore(
+            ctypes.c_void_p(CERT_STORE_PROV_SYSTEM), 0, None, flags, ctypes.c_wchar_p("MY")
+        )
+        store_mem = crypt32.CertOpenStore(
+            ctypes.c_void_p(CERT_STORE_PROV_MEMORY), 0, None, 0, None
+        )
+
+        found = False
+        for cert in iter_certs(store_sys):
+            if get_name(cert) == name:
+                crypt32.CertAddCertificateContextToStore(
+                    store_mem, cert, CERT_STORE_ADD_REPLACE_EXISTING, None
+                )
+                found = True
+                break
+        if not found:
+            return False
+
+        blob = DATA_BLOB(0, None)
+        export_flags = EXPORT_PRIVATE_KEYS | REPORT_NOT_ABLE_TO_EXPORT_PRIVATE_KEY
+        if crypt32.PFXExportCertStoreEx(
+            store_mem, ctypes.byref(blob), password, None, export_flags
+        ):
+            buf = ctypes.create_string_buffer(blob.cbData)
+            blob.pbData = ctypes.cast(buf, ctypes.c_void_p)
+            if crypt32.PFXExportCertStoreEx(
+                store_mem, ctypes.byref(blob), password, None, export_flags
+            ):
+                with open(path, "wb") as f:
+                    f.write(buf.raw)
+                return True
+    finally:
+        if store_sys:
+            crypt32.CertCloseStore(store_sys, 0)
+        if store_mem:
+            crypt32.CertCloseStore(store_mem, 0)
+    return False
+
+
 def delete_cert_and_key(name: str, serial: str = ""):
     _ensure_crypto()
     for store_name in ("MY", "AddressBook"):
@@ -736,9 +822,25 @@ def safe_config_path(name: str) -> Path:
     candidate = (base / filename).resolve()
     if candidate.parent != base:
         raise ValueError("Недопустимый путь к конфигу")
-    if not candidate.is_file():
-        raise FileNotFoundError(f"Файл не найден: {filename}")
     return candidate
+
+
+def safe_config_path_for_write(name: str) -> Path:
+    base = config_dir().resolve()
+    filename = Path(str(name)).name
+    if not filename.lower().endswith(".json"):
+        raise ValueError("Ожидается файл .json")
+    candidate = (base / filename).resolve()
+    if candidate.parent != base:
+        raise ValueError("Недопустимый путь к конфигу")
+    base.mkdir(parents=True, exist_ok=True)
+    return candidate
+
+
+def write_config_file(name: str, data: dict):
+    path = safe_config_path_for_write(name)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
 
 
 def load_config_file(name: str):
@@ -860,6 +962,45 @@ def handle(message):
             raise ValueError(f"Сертификат не найден: {name}")
         return {"ok": True, "cert": details}
 
+    if action == "export_cer":
+        name = message.get("name")
+        if not name:
+            raise ValueError("Не указано имя сертификата")
+        downloads = Path.home() / "Загрузки"
+        if not downloads.is_dir():
+            downloads = Path.home() / "Downloads"
+        downloads.mkdir(parents=True, exist_ok=True)
+        safe = "".join(c if c.isalnum() or c in " ._-()" else "_" for c in name).strip() or "cert"
+        path = downloads / f"{safe}.cer"
+        i = 1
+        while path.exists():
+            path = downloads / f"{safe}_{i}.cer"
+            i += 1
+        if not export_cer(name, str(path)):
+            raise ValueError("Не удалось экспортировать CER")
+        return {"ok": True, "path": str(path)}
+
+    if action == "export_pfx":
+        name = message.get("name")
+        password = message.get("password", "")
+        if not name:
+            raise ValueError("Не указано имя сертификата")
+        if not password:
+            raise ValueError("Не указан пароль для PFX")
+        downloads = Path.home() / "Загрузки"
+        if not downloads.is_dir():
+            downloads = Path.home() / "Downloads"
+        downloads.mkdir(parents=True, exist_ok=True)
+        safe = "".join(c if c.isalnum() or c in " ._-()" else "_" for c in name).strip() or "cert"
+        path = downloads / f"{safe}.pfx"
+        i = 1
+        while path.exists():
+            path = downloads / f"{safe}_{i}.pfx"
+            i += 1
+        if not export_pfx(name, str(path), password):
+            raise ValueError("Не удалось экспортировать PFX (возможно, нет закрытого ключа или неверный контекст)")
+        return {"ok": True, "path": str(path)}
+
     if action == "delete_cert":
         name = message.get("name")
         serial = message.get("serial", "")
@@ -867,6 +1008,43 @@ def handle(message):
             raise ValueError("Не указано имя сертификата")
         deleted = delete_cert_and_key(name, serial)
         return {"ok": bool(deleted), "deleted": bool(deleted)}
+
+    if action == "save_config":
+        name = message.get("name")
+        data = message.get("data")
+        if not name:
+            raise ValueError("Не указано имя конфига")
+        if not isinstance(data, dict):
+            raise ValueError("data должен быть объектом")
+        write_config_file(name, data)
+        return {"ok": True}
+
+    if action == "update_config_key":
+        name = message.get("name")
+        key = message.get("key")
+        value = message.get("value", "")
+        if not name:
+            raise ValueError("Не указано имя конфига")
+        if not key:
+            raise ValueError("Не указан ключ")
+        config = load_config_file(name)
+        config[key] = value
+        write_config_file(name, config)
+        return {"ok": True}
+
+    if action == "delete_config_key":
+        name = message.get("name")
+        key = message.get("key")
+        if not name:
+            raise ValueError("Не указано имя конфига")
+        if not key:
+            raise ValueError("Не указан ключ")
+        config = load_config_file(name)
+        if key not in config:
+            raise ValueError(f"Ключ не найден: {key}")
+        del config[key]
+        write_config_file(name, config)
+        return {"ok": True}
 
     raise ValueError(f"Неизвестное действие: {action}")
 

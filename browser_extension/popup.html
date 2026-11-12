@@ -71,6 +71,33 @@
       <div id="resolved" class="hint"></div>
     </section>
 
+    <section class="block" id="configEditSection" hidden>
+      <div class="block-head">
+        <label>РЕДАКТИРОВАНИЕ JSON</label>
+      </div>
+      <div class="row">
+        <input
+          id="editKeyInput"
+          type="text"
+          placeholder="Ключ..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <input
+          id="editValueInput"
+          type="text"
+          placeholder="Значение (CN сертификата)..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <div class="actions">
+        <button id="saveConfigKeyBtn" class="primary">Сохранить</button>
+        <button id="deleteConfigKeyBtn" class="ghost-red">Удалить ключ</button>
+      </div>
+      <div id="configEditHint" class="hint"></div>
+    </section>
+
     <section class="block">
       <div class="actions">
         <button id="showAllBtn" class="ghost-green">Показать все</button>
@@ -95,6 +122,16 @@
     </section>
 
     <footer id="log" class="log">Готов</footer>
+
+    <div id="detailsModal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-card">
+        <div class="modal-head">
+          <div id="detailsTitle" class="modal-title">Свойства сертификата</div>
+          <button id="detailsCloseBtn" class="icon-btn" type="button" title="Закрыть">✕</button>
+        </div>
+        <div id="detailsBody" class="modal-body"></div>
+      </div>
+    </div>
 
     <script src="popup.js"></script>
   </body>

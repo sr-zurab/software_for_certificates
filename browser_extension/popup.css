@@ -23,7 +23,8 @@ body {
 
 body {
   width: 420px;
-  height: 580px;
+  min-height: 580px;
+  max-height: 600px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -31,7 +32,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font: 12px/1.35 "Segoe UI", system-ui, -apple-system, sans-serif;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .hidden {
@@ -131,7 +132,7 @@ body {
 
 .block.grow {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 180px;
 }
 
 .block-head {
@@ -322,7 +323,7 @@ button.ghost-red:hover {
 
 .cert-list {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 120px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -468,4 +469,91 @@ button.ghost-red:hover {
 
 .log .info {
   color: var(--accent);
+}
+
+.cert-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 3px;
+}
+
+.mini-action {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 4px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--dim);
+  background: var(--panel);
+}
+
+.mini-action:hover {
+  color: var(--text);
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  z-index: 100;
+}
+
+.modal-card {
+  width: 100%;
+  max-height: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-title {
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-body {
+  padding: 8px;
+  overflow-y: auto;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail-label {
+  font-size: 9px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-value {
+  word-break: break-all;
+  white-space: pre-wrap;
 }

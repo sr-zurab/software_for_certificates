@@ -35,6 +35,16 @@ document.addEventListener("DOMContentLoaded", () => {
     "certCount",
     "certList",
     "log",
+    "configEditSection",
+    "editKeyInput",
+    "editValueInput",
+    "saveConfigKeyBtn",
+    "deleteConfigKeyBtn",
+    "configEditHint",
+    "detailsModal",
+    "detailsTitle",
+    "detailsBody",
+    "detailsCloseBtn",
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -69,6 +79,7 @@ function bindEvents() {
       updateResolved();
       writeState();
     }
+    updateConfigEditSection();
   });
   els.fileInput.addEventListener("change", onFileChosen);
   els.deleteConfigBtn.addEventListener("click", deleteCurrentConfig);
@@ -90,6 +101,12 @@ function bindEvents() {
   els.certSearch.addEventListener("input", () => {
     renderCerts();
     writeState();
+  });
+  els.saveConfigKeyBtn.addEventListener("click", saveConfigKey);
+  els.deleteConfigKeyBtn.addEventListener("click", deleteConfigKey);
+  els.detailsCloseBtn.addEventListener("click", hideDetails);
+  els.detailsModal.addEventListener("click", (e) => {
+    if (e.target === els.detailsModal) hideDetails();
   });
   window.addEventListener("pagehide", writeState);
 }
@@ -331,6 +348,7 @@ function selectFileConfig(entry) {
   }`;
   els.configInfo.className = "hint";
   updateResolved();
+  updateConfigEditSection();
   writeState();
 }
 
@@ -390,6 +408,7 @@ function deleteCurrentConfig() {
     : "Конфиг скрыт в расширении. JSON-файл на диске не изменён.";
   els.configInfo.className = "hint";
   updateResolved();
+  updateConfigEditSection();
   writeState();
   log(
     isFile
@@ -397,6 +416,124 @@ function deleteCurrentConfig() {
       : `Конфиг «${label}» скрыт в расширении`,
     "good"
   );
+}
+
+function updateConfigEditSection() {
+  const name = els.configSelect.value;
+  const fileEntry = findFileConfigByValue(name);
+  const isFileConfig = !!fileEntry;
+  const isDiskConfig = !!name && !isFileConfig && configData;
+
+  if (isFileConfig || isDiskConfig) {
+    els.configEditSection.hidden = false;
+    const currentKey = els.editKeyInput.value.trim();
+    if (currentKey && configData && Object.prototype.hasOwnProperty.call(configData, currentKey)) {
+      els.editValueInput.value = configData[currentKey];
+    } else {
+      els.editValueInput.value = "";
+    }
+    els.configEditHint.textContent = isFileConfig
+      ? `Редактирование файла: ${fileEntry.name} (сохраняется на диск)`
+      : `Редактирование конфига: ${configLabel} (сохраняется на диск)`;
+    els.configEditHint.className = "hint";
+  } else {
+    els.configEditSection.hidden = true;
+    els.editKeyInput.value = "";
+    els.editValueInput.value = "";
+    els.configEditHint.textContent = "";
+  }
+}
+
+async function saveConfigKey() {
+  const name = els.configSelect.value;
+  const fileEntry = findFileConfigByValue(name);
+  const key = els.editKeyInput.value.trim();
+  const value = els.editValueInput.value.trim();
+
+  if (!name) {
+    els.configEditHint.textContent = "Конфиг не выбран";
+    els.configEditHint.className = "hint bad";
+    return;
+  }
+  if (!key) {
+    els.configEditHint.textContent = "Введите ключ";
+    els.configEditHint.className = "hint bad";
+    return;
+  }
+  if (!value) {
+    els.configEditHint.textContent = "Введите значение";
+    els.configEditHint.className = "hint bad";
+    return;
+  }
+
+  els.saveConfigKeyBtn.disabled = true;
+  try {
+    if (fileEntry) {
+      await sendBg({ action: "save_config", name: fileEntry.name, data: { ...fileEntry.data, [key]: value } });
+      fileEntry.data[key] = value;
+      log(`Ключ "${key}" сохранён в ${fileEntry.name}`, "good");
+    } else {
+      await sendBg({ action: "update_config_key", name, key, value });
+      if (configData) configData[key] = value;
+      log(`Ключ "${key}" сохранён в ${configLabel || name}`, "good");
+    }
+    els.configEditHint.textContent = `Сохранено: ${key}`;
+    els.configEditHint.className = "hint good";
+    updateResolved();
+    await loadConfigs(els.configSelect.value);
+  } catch (error) {
+    els.configEditHint.textContent = `Ошибка: ${error.message}`;
+    els.configEditHint.className = "hint bad";
+    log(`Ошибка сохранения: ${error.message}`, "bad");
+  } finally {
+    els.saveConfigKeyBtn.disabled = false;
+  }
+}
+
+async function deleteConfigKey() {
+  const name = els.configSelect.value;
+  const fileEntry = findFileConfigByValue(name);
+  const key = els.editKeyInput.value.trim();
+
+  if (!name) {
+    els.configEditHint.textContent = "Конфиг не выбран";
+    els.configEditHint.className = "hint bad";
+    return;
+  }
+  if (!key) {
+    els.configEditHint.textContent = "Введите ключ для удаления";
+    els.configEditHint.className = "hint bad";
+    return;
+  }
+
+  if (!window.confirm(`Удалить ключ "${key}"?`)) return;
+
+  els.deleteConfigKeyBtn.disabled = true;
+  try {
+    if (fileEntry) {
+      const newData = { ...fileEntry.data };
+      delete newData[key];
+      await sendBg({ action: "save_config", name: fileEntry.name, data: newData });
+      fileEntry.data = newData;
+      log(`Ключ "${key}" удалён из ${fileEntry.name}`, "good");
+    } else {
+      await sendBg({ action: "delete_config_key", name, key });
+      if (configData) delete configData[key];
+      log(`Ключ "${key}" удалён из ${configLabel || name}`, "good");
+    }
+    els.editKeyInput.value = "";
+    els.editValueInput.value = "";
+    els.configEditHint.textContent = `Удалено: ${key}`;
+    els.configEditHint.className = "hint good";
+    updateResolved();
+    await loadConfigs(els.configSelect.value);
+  } catch (error) {
+    els.configEditHint.textContent = `Ошибка: ${error.message}`;
+    els.configEditHint.className = "hint bad";
+    log(`Ошибка удаления: ${error.message}`, "bad");
+  } finally {
+    els.deleteConfigKeyBtn.disabled = false;
+  }
 }
 
 function showNoConfigOption() {
@@ -414,6 +551,7 @@ function showNoConfigOption() {
     els.configSelect.prepend(placeholder);
   }
   els.configSelect.value = "";
+  updateConfigEditSection();
 }
 
 function readState() {
@@ -469,12 +607,14 @@ async function loadConfig(name) {
     els.configInfo.textContent = `${name} · ключей: ${count}`;
     els.configInfo.className = "hint";
     updateResolved();
+    updateConfigEditSection();
   } catch (error) {
     configData = null;
     configLabel = "";
     els.configInfo.textContent = `Не удалось загрузить ${name}: ${error.message}`;
     els.configInfo.className = "hint bad";
     updateResolved();
+    updateConfigEditSection();
   }
 }
 
@@ -689,12 +829,111 @@ function buildCertRow(cert) {
 
   info.append(name, meta);
 
+  const actions = document.createElement("div");
+  actions.className = "cert-actions";
+
+  const cerBtn = document.createElement("button");
+  cerBtn.className = "mini-action";
+  cerBtn.textContent = "CER";
+  cerBtn.title = "Выгрузить сертификат (.cer) в Загрузки";
+  cerBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    cerBtn.disabled = true;
+    try {
+      const res = await sendBg({ action: "export_cer", name: cert.name });
+      log(`CER сохранён: ${res.path}`, "good");
+    } catch (err) {
+      log(`Ошибка выгрузки CER: ${err.message}`, "bad");
+    } finally {
+      cerBtn.disabled = false;
+    }
+  });
+
+  const pfxBtn = document.createElement("button");
+  pfxBtn.className = "mini-action";
+  pfxBtn.textContent = "PFX";
+  pfxBtn.title = "Выгрузить сертификат с ключом (.pfx) в Загрузки";
+  pfxBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const password = window.prompt("Введите пароль для защиты PFX-файла:");
+    if (password === null) return;
+    if (!password) {
+      log("Пароль для PFX не указан", "bad");
+      return;
+    }
+    pfxBtn.disabled = true;
+    try {
+      const res = await sendBg({
+        action: "export_pfx",
+        name: cert.name,
+        password,
+      });
+      log(`PFX сохранён: ${res.path}`, "good");
+    } catch (err) {
+      log(`Ошибка выгрузки PFX: ${err.message}`, "bad");
+    } finally {
+      pfxBtn.disabled = false;
+    }
+  });
+
+  const detailsBtn = document.createElement("button");
+  detailsBtn.className = "mini-action";
+  detailsBtn.textContent = "i";
+  detailsBtn.title = "Свойства сертификата";
+  detailsBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    detailsBtn.disabled = true;
+    try {
+      const res = await sendBg({ action: "cert_details", name: cert.name });
+      showDetails(res.cert || res);
+    } catch (err) {
+      log(`Ошибка получения свойств: ${err.message}`, "bad");
+    } finally {
+      detailsBtn.disabled = false;
+    }
+  });
+
+  actions.append(cerBtn, pfxBtn, detailsBtn);
+
   const badge = document.createElement("span");
   badge.className = `badge ${cert.archived ? "badge-hidden" : "badge-visible"}`;
   badge.textContent = cert.archived ? "скрыт" : "виден";
 
-  row.append(toggle, info, badge);
+  row.append(toggle, info, actions, badge);
   return row;
+}
+
+function showDetails(cert) {
+  els.detailsTitle.textContent = cert.name || cert.cn || "Свойства сертификата";
+  els.detailsBody.replaceChildren();
+  const fields = [
+    ["CN", cert.cn || cert.name],
+    ["Friendly Name", cert.friendly],
+    ["Subject", cert.subject],
+    ["Полный Subject", cert.full_subject],
+    ["Издатель", cert.issuer],
+    ["Серийный номер", cert.serial],
+    ["Действует с", cert.not_before],
+    ["Действует до", cert.not_after],
+  ];
+  for (const [label, value] of fields) {
+    if (value == null || value === "") continue;
+    const row = document.createElement("div");
+    row.className = "detail-row";
+    const l = document.createElement("div");
+    l.className = "detail-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "detail-value";
+    v.textContent = String(value);
+    row.append(l, v);
+    els.detailsBody.append(row);
+  }
+  els.detailsModal.classList.remove("hidden");
+}
+
+function hideDetails() {
+  els.detailsModal.classList.add("hidden");
 }
 
 function daysUntil(iso) {
